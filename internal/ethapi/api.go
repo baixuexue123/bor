@@ -814,20 +814,40 @@ func (s *PublicBlockChainAPI) GetHeaderByHash(ctx context.Context, hash common.H
 	return nil
 }
 
+// getAuthor: returns the author of the Block
+func (s *PublicBlockChainAPI) getAuthor(head *types.Header) (*common.Address, error) {
+	// get author using From: Backend -> Engine -> Author
+	author, err := s.b.Engine().Author(head)
+	if err != nil {
+		return nil, err
+	}
+	// change the coinbase (0x0) with the miner address
+	return &author, nil
+}
+
 // GetBlockByNumber returns the requested canonical block.
-// * When blockNr is -1 the chain head is returned.
-// * When blockNr is -2 the pending chain head is returned.
-// * When fullTx is true all transactions in the block are returned, otherwise
-//   only the transaction hash is returned.
+//   - When blockNr is -1 the chain head is returned.
+//   - When blockNr is -2 the pending chain head is returned.
+//   - When fullTx is true all transactions in the block are returned, otherwise
+//     only the transaction hash is returned.
 func (s *PublicBlockChainAPI) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
 	block, err := s.b.BlockByNumber(ctx, number)
 	if block != nil && err == nil {
+
 		response, err := s.rpcMarshalBlock(ctx, block, true, fullTx)
 		if err == nil && number == rpc.PendingBlockNumber {
 			// Pending blocks need to nil out a few fields
 			for _, field := range []string{"hash", "nonce", "miner"} {
 				response[field] = nil
 			}
+		}
+
+		if err == nil && number != rpc.PendingBlockNumber {
+			author, err := s.getAuthor(block.Header())
+			if err != nil {
+				return nil, err
+			}
+			response["miner"] = author
 		}
 
 		// append marshalled bor transaction
@@ -848,6 +868,13 @@ func (s *PublicBlockChainAPI) GetBlockByHash(ctx context.Context, hash common.Ha
 		response, err := s.rpcMarshalBlock(ctx, block, true, fullTx)
 		// append marshalled bor transaction
 		if err == nil && response != nil {
+
+			author, err := s.getAuthor(block.Header())
+			if err != nil {
+				return nil, err
+			}
+			response["miner"] = author
+
 			return s.appendRPCMarshalBorTransaction(ctx, block, response, fullTx), err
 		}
 		return response, err
