@@ -977,54 +977,17 @@ func (api *API) EventCall(ctx context.Context, args ethapi.TransactionArgs, bloc
 	}
 	vmctx := core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil)
 
-	var traceConfig *TraceConfig
-	if config != nil {
-		traceConfig = &TraceConfig{
-			Config:  config.Config,
-			Tracer:  config.Tracer,
-			Timeout: config.Timeout,
-			Reexec:  config.Reexec,
-		}
-	}
-	return api.eventTx(ctx, msg, new(Context), vmctx, statedb, traceConfig)
+	return api.eventTx(ctx, msg, new(Context), vmctx, statedb)
 }
 
-func (api *API) eventTx(ctx context.Context, message core.Message, txctx *Context, vmctx vm.BlockContext, statedb *state.StateDB, config *TraceConfig) (interface{}, error) {
+func (api *API) eventTx(ctx context.Context, message core.Message, txctx *Context, vmctx vm.BlockContext, statedb *state.StateDB) (interface{}, error) {
 	// Assemble the structured logger or the JavaScript tracer
 	var (
-		tracer    vm.EVMLogger
 		err       error
 		txContext = core.NewEVMTxContext(message)
 	)
-	switch {
-	case config == nil:
-		tracer = logger.NewStructLogger(nil)
-	case config.Tracer != nil:
-		// Define a meaningful timeout of a single transaction trace
-		timeout := defaultTraceTimeout
-		if config.Timeout != nil {
-			if timeout, err = time.ParseDuration(*config.Timeout); err != nil {
-				return nil, err
-			}
-		}
-		if t, err := New(*config.Tracer, txctx); err != nil {
-			return nil, err
-		} else {
-			deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
-			go func() {
-				<-deadlineCtx.Done()
-				if errors.Is(deadlineCtx.Err(), context.DeadlineExceeded) {
-					t.Stop(errors.New("execution timeout"))
-				}
-			}()
-			defer cancel()
-			tracer = t
-		}
-	default:
-		tracer = logger.NewStructLogger(config.Config)
-	}
 	// Run the transaction with tracing enabled.
-	vmenv := vm.NewEVM(vmctx, txContext, statedb, api.backend.ChainConfig(), vm.Config{Debug: true, Tracer: tracer, NoBaseFee: true})
+	vmenv := vm.NewEVM(vmctx, txContext, statedb, api.backend.ChainConfig(), vm.Config{Debug: false, Tracer: nil, NoBaseFee: true})
 
 	// Call Prepare to clear out the statedb access list
 	statedb.Prepare(txctx.TxHash, txctx.TxIndex)
@@ -1034,22 +997,12 @@ func (api *API) eventTx(ctx context.Context, message core.Message, txctx *Contex
 		return nil, fmt.Errorf("tracing failed: %w", err)
 	}
 
-	// Depending on the tracer type, format and return the output.
-	switch tracer := tracer.(type) {
-	case *logger.StructLogger:
-		return &ExecutionEvent{
-			Gas:         result.UsedGas,
-			Failed:      result.Failed(),
-			ReturnValue: "",
-			Logs:        statedb.GetLogs(txctx.TxHash, txctx.BlockHash),
-		}, nil
-
-	case Tracer:
-		return tracer.GetResult()
-
-	default:
-		panic(fmt.Sprintf("bad tracer type %T", tracer))
-	}
+	return &ExecutionEvent{
+		Gas:         result.UsedGas,
+		Failed:      result.Failed(),
+		ReturnValue: "",
+		Logs:        statedb.GetLogs(txctx.TxHash, txctx.BlockHash),
+	}, nil
 }
 
 type ExecutionEvent struct {
