@@ -14,6 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration
+// +build integration
+
 package tests
 
 import (
@@ -48,7 +51,7 @@ func TestTransaction(t *testing.T) {
 	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *TransactionTest) {
 		cfg := params.MainnetChainConfig
 		if err := txt.checkFailure(t, test.Run(cfg)); err != nil {
-			t.Error(err)
+			t.Errorf("in 'transaction_test.go', test '%s' failed with error: '%v'", name, err)
 		}
 	})
 }

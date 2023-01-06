@@ -14,6 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration
+// +build integration
+
 package tests
 
 import (
@@ -25,7 +28,7 @@ func TestRLP(t *testing.T) {
 	tm := new(testMatcher)
 	tm.walk(t, rlpTestDir, func(t *testing.T, name string, test *RLPTest) {
 		if err := tm.checkFailure(t, test.Run()); err != nil {
-			t.Error(err)
+			t.Errorf("in 'rlp_test.go', test '%s' failed with error: '%v'", name, err)
 		}
 	})
 }

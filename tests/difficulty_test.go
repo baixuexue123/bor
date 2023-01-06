@@ -14,6 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration
+// +build integration
+
 package tests
 
 import (
@@ -88,7 +91,7 @@ func TestDifficulty(t *testing.T) {
 			return
 		}
 		if err := dt.checkFailure(t, test.Run(cfg)); err != nil {
-			t.Error(err)
+			t.Errorf("in 'difficulty_test.go', test '%s' failed with error: '%v'", name, err)
 		}
 	})
 }

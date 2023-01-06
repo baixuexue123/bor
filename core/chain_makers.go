@@ -17,6 +17,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -257,7 +259,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
-			block, _ := b.engine.FinalizeAndAssemble(chainreader, b.header, statedb, b.txs, b.uncles, b.receipts)
+			block, _ := b.engine.FinalizeAndAssemble(context.Background(), chainreader, b.header, statedb, b.txs, b.uncles, b.receipts)
 
 			// Write state changes to db
 			root, err := statedb.Commit(config.IsEIP158(b.header.Number))
@@ -334,7 +336,10 @@ func makeBlockChain(parent *types.Block, n int, engine consensus.Engine, db ethd
 }
 
 type fakeChainReader struct {
-	config *params.ChainConfig
+	config        *params.ChainConfig
+	stateSyncData []*types.StateSyncData
+	stateSyncFeed event.Feed
+	scope         event.SubscriptionScope
 }
 
 // Config returns the chain configuration.
@@ -348,3 +353,13 @@ func (cr *fakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header      
 func (cr *fakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
 func (cr *fakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
 func (cr *fakeChainReader) GetTd(hash common.Hash, number uint64) *big.Int          { return nil }
+
+// SetStateSync set sync data in state_data
+func (cr *fakeChainReader) SetStateSync(stateData []*types.StateSyncData) {
+	cr.stateSyncData = stateData
+}
+
+// SubscribeStateSyncEvent registers a subscription of StateSyncEvent.
+func (cr *fakeChainReader) SubscribeStateSyncEvent(ch chan<- StateSyncEvent) event.Subscription {
+	return cr.scope.Track(cr.stateSyncFeed.Subscribe(ch))
+}
