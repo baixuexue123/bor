@@ -8,6 +8,7 @@ import (
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -66,7 +67,14 @@ func (api *PublicFilterAPI) NewDeposits(ctx context.Context, crit ethereum.State
 
 		for {
 			select {
-			case h := <-stateSyncData:
+			case h, ok := <-stateSyncData:
+				if !ok {
+					return
+				}
+				if h == nil {
+					log.Crit("NewDeposits got a nil pointer", h)
+					continue
+				}
 				if crit.ID == h.ID || bytes.Compare(crit.Contract.Bytes(), h.Contract.Bytes()) == 0 ||
 					(crit.ID == 0 && crit.Contract == common.Address{}) {
 					notifier.Notify(rpcSub.ID, h)
