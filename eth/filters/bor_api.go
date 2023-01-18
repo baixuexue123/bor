@@ -69,6 +69,7 @@ func (api *PublicFilterAPI) NewDeposits(ctx context.Context, crit ethereum.State
 			select {
 			case h, ok := <-stateSyncData:
 				if !ok {
+					stateSyncSub.Unsubscribe()
 					return
 				}
 				if h == nil {
