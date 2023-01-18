@@ -73,8 +73,8 @@ func (api *PublicFilterAPI) NewDeposits(ctx context.Context, crit ethereum.State
 					return
 				}
 				if h == nil {
-					log.Crit("NewDeposits got a nil pointer", h)
-					continue
+					log.Warn("NewDeposits got a nil pointer")
+					return
 				}
 				if crit.ID == h.ID || bytes.Compare(crit.Contract.Bytes(), h.Contract.Bytes()) == 0 ||
 					(crit.ID == 0 && crit.Contract == common.Address{}) {
