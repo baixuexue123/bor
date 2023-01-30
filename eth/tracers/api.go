@@ -1167,6 +1167,79 @@ func (api *API) traceTx(ctx context.Context, message core.Message, txctx *Contex
 	}
 }
 
+func (api *API) EventCall(ctx context.Context, args ethapi.TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, config *TraceCallConfig) (interface{}, error) {
+	// Try to retrieve the specified block
+	var (
+		err   error
+		block *types.Block
+	)
+	if hash, ok := blockNrOrHash.Hash(); ok {
+		block, err = api.blockByHash(ctx, hash)
+	} else if number, ok := blockNrOrHash.Number(); ok {
+		block, err = api.blockByNumber(ctx, number)
+	} else {
+		return nil, errors.New("invalid arguments; neither block nor hash specified")
+	}
+	if err != nil {
+		return nil, err
+	}
+	// try to recompute the state
+	reexec := defaultTraceReexec
+	if config != nil && config.Reexec != nil {
+		reexec = *config.Reexec
+	}
+	statedb, err := api.backend.StateAtBlock(ctx, block, reexec, nil, true, false)
+	if err != nil {
+		return nil, err
+	}
+	// Apply the customized state rules if required.
+	if config != nil {
+		if err := config.StateOverrides.Apply(statedb); err != nil {
+			return nil, err
+		}
+	}
+	// Execute the trace
+	msg, err := args.ToMessage(api.backend.RPCGasCap(), block.BaseFee())
+	if err != nil {
+		return nil, err
+	}
+	vmctx := core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil)
+
+	return api.eventTx(msg, new(Context), vmctx, statedb)
+}
+
+func (api *API) eventTx(message core.Message, txctx *Context, vmctx vm.BlockContext, statedb *state.StateDB) (interface{}, error) {
+	// Assemble the structured logger or the JavaScript tracer
+	var (
+		err       error
+		txContext = core.NewEVMTxContext(message)
+	)
+	// Run the transaction with tracing enabled.
+	vmenv := vm.NewEVM(vmctx, txContext, statedb, api.backend.ChainConfig(), vm.Config{Debug: false, Tracer: nil, NoBaseFee: true})
+
+	// Call Prepare to clear out the statedb access list
+	statedb.Prepare(txctx.TxHash, txctx.TxIndex)
+
+	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()))
+	if err != nil {
+		return nil, fmt.Errorf("tracing failed: %w", err)
+	}
+
+	return &ExecutionEvent{
+		Gas:         result.UsedGas,
+		Failed:      result.Failed(),
+		ReturnValue: "",
+		Logs:        statedb.GetLogs(txctx.TxHash, txctx.BlockHash),
+	}, nil
+}
+
+type ExecutionEvent struct {
+	Gas         uint64       `json:"gas"`
+	Failed      bool         `json:"failed"`
+	ReturnValue string       `json:"returnValue"`
+	Logs        []*types.Log `json:"logs"`
+}
+
 // APIs return the collection of RPC services the tracer package offers.
 func APIs(backend Backend) []rpc.API {
 	// Append all the local APIs and return
