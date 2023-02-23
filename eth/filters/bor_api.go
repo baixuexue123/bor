@@ -1,14 +1,12 @@
 package filters
 
 import (
-	"bytes"
 	"context"
 	"errors"
 
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -20,7 +18,7 @@ func (api *PublicFilterAPI) SetChainConfig(chainConfig *params.ChainConfig) {
 
 func (api *PublicFilterAPI) GetBorBlockLogs(ctx context.Context, crit FilterCriteria) ([]*types.Log, error) {
 	if api.chainConfig == nil {
-		return nil, errors.New("No chain config found. Proper PublicFilterAPI initialization required")
+		return nil, errors.New("no chain config found. Proper PublicFilterAPI initialization required")
 	}
 
 	// get sprint from bor config
@@ -67,17 +65,9 @@ func (api *PublicFilterAPI) NewDeposits(ctx context.Context, crit ethereum.State
 
 		for {
 			select {
-			case h, ok := <-stateSyncData:
-				if !ok {
-					stateSyncSub.Unsubscribe()
-					return
-				}
-				if h == nil {
-					log.Warn("NewDeposits got a nil pointer")
-					continue
-				}
-				if crit.ID == h.ID || bytes.Compare(crit.Contract.Bytes(), h.Contract.Bytes()) == 0 ||
-					(crit.ID == 0 && crit.Contract == common.Address{}) {
+			case h := <-stateSyncData:
+				if h != nil && (crit.ID == h.ID || crit.Contract == h.Contract ||
+					(crit.ID == 0 && crit.Contract == common.Address{})) {
 					notifier.Notify(rpcSub.ID, h)
 				}
 			case <-rpcSub.Err():
