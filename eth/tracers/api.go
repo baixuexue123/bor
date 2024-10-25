@@ -1456,10 +1456,10 @@ func (api *API) EventCall(ctx context.Context, args ethapi.TransactionArgs, bloc
 	}
 
 	// Execute the trace
-	msg, err := args.ToMessage(api.backend.RPCGasCap(), block.BaseFee())
-	if err != nil {
+	if err := args.CallDefaults(api.backend.RPCGasCap(), vmctx.BaseFee, api.backend.ChainConfig().ChainID); err != nil {
 		return nil, err
 	}
+	msg := args.ToMessage(block.BaseFee())
 
 	// Assemble the structured logger or the JavaScript tracer
 	var (
