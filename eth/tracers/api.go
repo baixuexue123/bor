@@ -1513,7 +1513,7 @@ func (api *API) EventCall(ctx context.Context, args ethapi.TransactionArgs, bloc
 		}
 	} else {
 		// nolint : contextcheck
-		result, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.GasLimit), context.Background())
+		result, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.GasLimit), nil)
 		if err != nil {
 			return nil, fmt.Errorf("tracing failed: %w", err)
 		}
