@@ -1481,7 +1481,7 @@ func (api *API) EventCall(ctx context.Context, args ethapi.TransactionArgs, bloc
 		return nil, err
 	}
 	var (
-		msg   = args.ToMessage(vmctx.BaseFee, true, true)
+		msg   = args.ToMessage(vmctx.BaseFee, true)
 		txctx = new(Context)
 	)
 	// Run the transaction with tracing enabled.
@@ -1522,7 +1522,7 @@ func (api *API) EventCall(ctx context.Context, args ethapi.TransactionArgs, bloc
 	return &ExecutionEvent{
 		Gas:    result.UsedGas,
 		Failed: result.Failed(),
-		Logs:   statedb.GetLogs(txctx.TxHash, 0, txctx.BlockHash),
+		Logs:   statedb.GetLogs(txctx.TxHash, 0, txctx.BlockHash, vmctx.Time),
 	}, nil
 }
 
