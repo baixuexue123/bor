@@ -1587,7 +1587,7 @@ func (api *API) EventCall(ctx context.Context, args ethapi.TransactionArgs, bloc
 		}
 	} else {
 		// nolint : contextcheck
-		result, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.GasLimit), nil)
+		result, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.GasLimit))
 		if err != nil {
 			return nil, fmt.Errorf("tracing failed: %w", err)
 		}
