@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -177,6 +178,9 @@ type TraceCallConfig struct {
 	StateOverrides *override.StateOverride
 	BlockOverrides *override.BlockOverrides
 	TxIndex        *hexutil.Uint
+	// BorTx, when set, executes the call as a bor system message
+	// (zero gas price, system sender semantics). Used by EventCall.
+	BorTx *bool
 }
 
 // StdTraceConfig holds extra parameters to standard-json trace functions.
@@ -1347,21 +1351,10 @@ func (api *API) EventCall(ctx context.Context, args ethapi.TransactionArgs, bloc
 	// Call Prepare to clear out the statedb access list
 	statedb.SetTxContext(txctx.TxHash, txctx.TxIndex)
 
-	if config == nil {
-		config = &TraceCallConfig{
-			TraceConfig: TraceConfig{
-				BorTraceEnabled: defaultBorTraceEnabled,
-				BorTx:           newBoolPtr(false),
-			},
-		}
-	}
-
-	if config.BorTx == nil {
-		config.BorTx = newBoolPtr(false)
-	}
+	borTx := config != nil && config.BorTx != nil && *config.BorTx
 
 	var result *core.ExecutionResult
-	if *config.BorTx {
+	if borTx {
 		callmsg := prepareCallMessage(*msg)
 		// nolint : contextcheck
 		result, err = statefull.ApplyBorMessage(vmenv, callmsg)
@@ -1381,6 +1374,23 @@ func (api *API) EventCall(ctx context.Context, args ethapi.TransactionArgs, bloc
 		Failed: result.Failed(),
 		Logs:   statedb.GetLogs(txctx.TxHash, 0, txctx.BlockHash, vmctx.Time),
 	}, nil
+}
+
+// prepareCallMessage converts a core.Message into a statefull.Callmsg
+// so it can be executed as a bor system message via ApplyBorMessage.
+func prepareCallMessage(msg core.Message) statefull.Callmsg {
+	return statefull.Callmsg{
+		CallMsg: ethereum.CallMsg{
+			From:       msg.From,
+			To:         msg.To,
+			Gas:        msg.GasLimit,
+			GasPrice:   msg.GasPrice,
+			GasFeeCap:  msg.GasFeeCap,
+			GasTipCap:  msg.GasTipCap,
+			Value:      msg.Value,
+			Data:       msg.Data,
+			AccessList: msg.AccessList,
+		}}
 }
 
 type ExecutionEvent struct {
