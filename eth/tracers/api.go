@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -177,6 +178,9 @@ type TraceCallConfig struct {
 	StateOverrides *override.StateOverride
 	BlockOverrides *override.BlockOverrides
 	TxIndex        *hexutil.Uint
+	// BorTx, when set, executes the call as a bor system message
+	// (zero gas price, system sender semantics). Used by EventCall.
+	BorTx *bool
 }
 
 // StdTraceConfig holds extra parameters to standard-json trace functions.
@@ -1280,6 +1284,122 @@ func (api *API) traceTx(ctx context.Context, tx *types.Transaction, message *cor
 	}
 	result, err := tracer.GetResult()
 	return result, usedGas, err
+}
+
+// EventCall executes the given call as a message on top of the specified block's
+// state and returns the gas used, failure status and emitted logs. When
+// config.BorTx is set, the call is applied as a bor system message.
+func (api *API) EventCall(ctx context.Context, args ethapi.TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, config *TraceCallConfig) (interface{}, error) {
+	// Try to retrieve the specified block
+	var (
+		err         error
+		block       *types.Block
+		precompiles vm.PrecompiledContracts
+	)
+	if hash, ok := blockNrOrHash.Hash(); ok {
+		block, err = api.blockByHash(ctx, hash)
+	} else if number, ok := blockNrOrHash.Number(); ok {
+		block, err = api.blockByNumber(ctx, number)
+	} else {
+		return nil, errors.New("invalid arguments; neither block nor hash specified")
+	}
+	if err != nil {
+		return nil, err
+	}
+	// try to recompute the state
+	reexec := defaultTraceReexec
+	if config != nil && config.Reexec != nil {
+		reexec = *config.Reexec
+	}
+	statedb, release, err := api.backend.StateAtBlock(ctx, block, reexec, nil, true, false)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	vmctx := core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil)
+
+	// Apply the customization rules if required.
+	if config != nil {
+		if overrideErr := config.BlockOverrides.Apply(&vmctx); overrideErr != nil {
+			return nil, overrideErr
+		}
+		rules := api.backend.ChainConfig().Rules(vmctx.BlockNumber, vmctx.Random != nil, vmctx.Time)
+
+		precompiles = vm.ActivePrecompiledContracts(rules)
+		if err := config.StateOverrides.Apply(statedb, precompiles); err != nil {
+			return nil, err
+		}
+	}
+
+	vmctx.GetHash = func(n uint64) common.Hash {
+		header, err := api.backend.HeaderByNumber(ctx, rpc.BlockNumber(int64(n)))
+		if err != nil {
+			return common.Hash{}
+		}
+		return header.Hash()
+	}
+
+	// Execute the trace
+	if err := args.CallDefaults(api.backend.RPCGasCap(), vmctx.BaseFee, api.backend.ChainConfig().ChainID); err != nil {
+		return nil, err
+	}
+	var (
+		msg   = args.ToMessage(vmctx.BaseFee, true)
+		txctx = new(Context)
+	)
+	// Run the transaction with tracing enabled.
+	vmenv := vm.NewEVM(vmctx, statedb, api.backend.ChainConfig(), vm.Config{Tracer: nil, NoBaseFee: true})
+
+	// Call Prepare to clear out the statedb access list
+	statedb.SetTxContext(txctx.TxHash, txctx.TxIndex)
+
+	borTx := config != nil && config.BorTx != nil && *config.BorTx
+
+	var result *core.ExecutionResult
+	if borTx {
+		callmsg := prepareCallMessage(*msg)
+		// nolint : contextcheck
+		result, err = statefull.ApplyBorMessage(vmenv, callmsg)
+		if err != nil {
+			return nil, fmt.Errorf("tracing failed: %w", err)
+		}
+	} else {
+		// nolint : contextcheck
+		result, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.GasLimit))
+		if err != nil {
+			return nil, fmt.Errorf("tracing failed: %w", err)
+		}
+	}
+
+	return &ExecutionEvent{
+		Gas:    result.UsedGas,
+		Failed: result.Failed(),
+		Logs:   statedb.GetLogs(txctx.TxHash, 0, txctx.BlockHash, vmctx.Time),
+	}, nil
+}
+
+// prepareCallMessage converts a core.Message into a statefull.Callmsg
+// so it can be executed as a bor system message via ApplyBorMessage.
+func prepareCallMessage(msg core.Message) statefull.Callmsg {
+	return statefull.Callmsg{
+		CallMsg: ethereum.CallMsg{
+			From:       msg.From,
+			To:         msg.To,
+			Gas:        msg.GasLimit,
+			GasPrice:   msg.GasPrice,
+			GasFeeCap:  msg.GasFeeCap,
+			GasTipCap:  msg.GasTipCap,
+			Value:      msg.Value,
+			Data:       msg.Data,
+			AccessList: msg.AccessList,
+		}}
+}
+
+type ExecutionEvent struct {
+	Gas    uint64       `json:"gas"`
+	Failed bool         `json:"failed"`
+	Logs   []*types.Log `json:"logs"`
 }
 
 // APIs return the collection of RPC services the tracer package offers.
