@@ -345,6 +345,43 @@ func (api *FilterAPI) Logs(ctx context.Context, crit FilterCriteria) (*rpc.Subsc
 	return rpcSub, nil
 }
 
+// OneLogs is like Logs, but every log is notified individually and each batch
+// (the logs of one block) is terminated by an empty log, so clients can
+// detect batch boundaries.
+func (api *FilterAPI) OneLogs(ctx context.Context, crit FilterCriteria) (*rpc.Subscription, error) {
+	notifier, supported := rpc.NotifierFromContext(ctx)
+	if !supported {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+
+	var (
+		rpcSub      = notifier.CreateSubscription()
+		matchedLogs = make(chan []*types.Log)
+	)
+
+	logsSub, err := api.subscribeLogs(crit, matchedLogs)
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		defer logsSub.Unsubscribe()
+		for {
+			select {
+			case logs := <-matchedLogs:
+				for _, log := range logs {
+					notifier.Notify(rpcSub.ID, log)
+				}
+				notifier.Notify(rpcSub.ID, &types.Log{})
+			case <-rpcSub.Err(): // client send an unsubscribe request
+				return
+			}
+		}
+	}()
+
+	return rpcSub, nil
+}
+
 // TransactionReceiptsQuery defines criteria for transaction receipts subscription.
 // Same as ethereum.TransactionReceiptsQuery but with UnmarshalJSON() method.
 type TransactionReceiptsQuery ethereum.TransactionReceiptsQuery
